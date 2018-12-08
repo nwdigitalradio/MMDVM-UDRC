@@ -23,13 +23,19 @@ const uint16_t POCSAG_FRAME_LENGTH_BYTES = 17U * sizeof(uint32_t);
 
 const uint16_t POCSAG_PREAMBLE_LENGTH_BYTES = 18U * sizeof(uint32_t);
 
-const uint16_t POCSAG_RADIO_SYMBOL_LENGTH = 20U;
+const uint16_t POCSAG_RADIO_SYMBOL_LENGTH = 40U;
 
-const float POCSAG_LEVEL1[] = { 0.741,  0.741,  0.741,  0.741,  0.741,  0.741,  0.741,  0.741,  0.741,  0.741,  0.741,  0.741,  0.741,  0.741,  0.741,  0.741,  0.741,  0.741,  0.741,  0.741};
-const float POCSAG_LEVEL0[] = {-0.741, -0.741, -0.741, -0.741, -0.741, -0.741, -0.741, -0.741, -0.741, -0.741, -0.741, -0.741, -0.741, -0.741, -0.741, -0.741, -0.741, -0.741, -0.741, -0.741};
+const float POCSAG_LEVEL1[] = { 0.741F,  0.741F,  0.741F,  0.741F,  0.741F,  0.741F,  0.741F,  0.741F,  0.741F,  0.741F,  0.741F,
+							    0.741F,  0.741F,  0.741F,  0.741F,  0.741F,  0.741F,  0.741F,  0.741F,  0.741F,  0.741F,  0.741F,
+								0.741F,  0.741F,  0.741F,  0.741F,  0.741F,  0.741F,  0.741F,  0.741F,  0.741F,  0.741F,  0.741F,
+								0.741F,  0.741F,  0.741F,  0.741F,  0.741F,  0.741F,  0.741F};
+const float POCSAG_LEVEL0[] = {-0.741F, -0.741F, -0.741F, -0.741F, -0.741F, -0.741F, -0.741F, -0.741F, -0.741F, -0.741F, -0.741F,
+							   -0.741F, -0.741F, -0.741F, -0.741F, -0.741F, -0.741F, -0.741F, -0.741F, -0.741F, -0.741F, -0.741F,
+							   -0.741F, -0.741F, -0.741F, -0.741F, -0.741F, -0.741F, -0.741F, -0.741F, -0.741F, -0.741F, -0.741F,
+							   -0.741F, -0.741F, -0.741F, -0.741F, -0.741F, -0.741F, -0.741F};
 
-const float SHAPING_FILTER[] = {0.1667F, 0.1667F, 0.1667F, 0.1667F, 0.1667F, 0.1667F};
-const uint16_t SHAPING_FILTER_LEN = 6U;
+const float SHAPING_FILTER[] = {0.5F, 0.5F, 0.5F, 0.5F, 0.5F, 0.5F, 0.5F, 0.5F, 0.5F, 0.5F, 0.5F, 0.5F};
+const uint16_t SHAPING_FILTER_LEN = 12U;
 
 const uint8_t POCSAG_SYNC = 0xAAU;
 

@@ -21,7 +21,6 @@
 
 #include "FIRInterpolator.h"
 #include "SerialRB.h"
-#include "FIR.h"
 
 class CNXDNTX {
 public:
@@ -38,7 +37,6 @@ public:
 private:
   CSerialRB        m_buffer;
   CFIRInterpolator m_modFilter;
-  CFIR             m_sincFilter;
   uint8_t          m_poBuffer[1200U];
   uint16_t         m_poLen;
   uint16_t         m_poPtr;
