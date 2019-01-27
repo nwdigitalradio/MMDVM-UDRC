@@ -1,0 +1,13 @@
+Source: mmdvm-udrc
+Maintainer: Annaliese McDermond <nh6z@nh6z.net>
+Build-Depends: debhelper (>= 9), wiringpi
+Section: hamradio
+Priority: optional
+Standards-Version: 4.1.4.1
+
+Package: mmdvm-udrc
+Architecture: armhf
+Depends: ${misc:Depends}, wiringpi
+Description: Multi-Mode Digital Voice Modem for UDRC
+Section: hamradio
+Priority: optional
