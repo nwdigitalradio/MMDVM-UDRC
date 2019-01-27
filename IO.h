@@ -25,38 +25,42 @@
 #include "Biquad.h"
 #include "FIR.h"
 
+#include <pthread.h>
+
 class CIO : public IAudioCallback {
 public:
-  CIO();
+    CIO();
 
-  void start();
+    void start();
 
-  void process();
+    void process();
 
-  void write(MMDVM_STATE mode, float* samples, uint16_t length);
+    void write(MMDVM_STATE mode, float* samples, uint16_t length);
 
-  uint16_t getSpace() const;
+    uint16_t getSpace() const;
 
-  void setDecode(bool dcd);
-  void setADCDetection(bool detect);
-  void setMode();
+    void setDecode(bool dcd);
+    void setADCDetection(bool detect);
+    void setMode();
 
-  void interrupt();
+    void interrupt();
 
-  void setParameters(bool rxInvert, bool txInvert, bool pttInvert, float rxLevel, float cwIdTXLevel, float dstarTXLevel, float dmrTXLevel, float ysfTXLevel, float p25TXLevel, float nxdnTXLevel, float pocsagTXLevel, float txDCOffset, float rxDCOffset);
+    void setParameters(bool rxInvert, bool txInvert, bool pttInvert, float rxLevel, float cwIdTXLevel, float dstarTXLevel, float dmrTXLevel, float ysfTXLevel, float p25TXLevel, float nxdnTXLevel, float pocsagTXLevel, float txDCOffset, float rxDCOffset);
 
-  void getOverflow(bool& adcOverflow, bool& dacOverflow);
+    void getOverflow(bool& adcOverflow, bool& dacOverflow);
 
-  bool hasTXOverflow();
-  bool hasRXOverflow();
+    bool hasTXOverflow();
+    bool hasRXOverflow();
 
-  bool hasLockout() const;
+    bool hasLockout() const;
 
-  void resetWatchdog();
-  uint32_t getWatchdog();
+    void resetWatchdog();
+    uint32_t getWatchdog();
 
-  virtual void readCallback(const float* input, unsigned int nSamples);
-  virtual void writeCallback(float* output, int& nSamples);
+    virtual void readCallback(const float* input, unsigned int nSamples);
+    virtual void writeCallback(float* output, int& nSamples);
+    virtual void processReceiveData();
+
 
 private:
   bool                 m_started;
@@ -95,6 +99,7 @@ private:
   volatile uint32_t    m_watchdog;
 
   bool                 m_lockout;
+
 
   // Hardware specific routines
   void initInt();

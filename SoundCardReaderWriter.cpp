@@ -21,318 +21,192 @@
 
 #include <cstdio>
 #include <cassert>
+#include <pulse/pulseaudio.h>
+#include <string.h>
 
-CSoundCardReaderWriter::CSoundCardReaderWriter(const std::string& readDevice, const std::string& writeDevice, unsigned int sampleRate, unsigned int blockSize) :
-m_readDevice(readDevice),
-m_writeDevice(writeDevice),
+
+CSoundCardReaderWriter::CSoundCardReaderWriter(const std::string& captureDevice, const std::string& playbackDevice, unsigned int sampleRate, unsigned int blockSize) :
+m_captureDevice(captureDevice),
+m_playbackDevice(playbackDevice),
 m_sampleRate(sampleRate),
 m_blockSize(blockSize),
 m_callback(NULL),
-m_reader(NULL),
-m_writer(NULL)
-{
+m_mainloop(NULL) {
     assert(sampleRate > 0U);
     assert(blockSize > 0U);
 }
 
-CSoundCardReaderWriter::~CSoundCardReaderWriter()
-{
+CSoundCardReaderWriter::~CSoundCardReaderWriter() {
 }
 
-void CSoundCardReaderWriter::setCallback(IAudioCallback* callback)
-{
+void CSoundCardReaderWriter::setCallback(IAudioCallback* callback) {
 	assert(callback != NULL);
 
 	m_callback = callback;
 }
 
-bool CSoundCardReaderWriter::open()
-{
-	int err = 0;
+void CSoundCardReaderWriter::contextStateCallback(pa_context *c, void *userdata) {
+    CSoundCardReaderWriter *This = static_cast<CSoundCardReaderWriter*>(userdata);
 
-	char buf1[100];
-	char buf2[100];
-	char* ptr;
-
-	::strcpy(buf1, (const char*)m_writeDevice.c_str());
-	::strcpy(buf2, (const char*)m_readDevice.c_str());
-
-	ptr = ::strchr(buf1, ' ');
-	if (ptr) *ptr = 0;				// Get Device part of name
-
-	ptr = ::strchr(buf2, ' ');
-	if (ptr) *ptr = 0;				// Get Device part of name
-
-	std::string writeDevice(buf1);
-	std::string readDevice(buf2);
-
-	snd_pcm_t* playHandle = NULL;
-	if ((err = ::snd_pcm_open(&playHandle, buf1, SND_PCM_STREAM_PLAYBACK, 0)) < 0) {
-		::fprintf(stderr, "Cannot open playback audio device %s (%s)\n", writeDevice.c_str(), ::snd_strerror(err));
-		return false;
-	}
-
-	snd_pcm_hw_params_t* hw_params;
-	if ((err = ::snd_pcm_hw_params_malloc(&hw_params)) < 0) {
-		::fprintf(stderr, "Cannot allocate hardware parameter structure (%s)\n", ::snd_strerror(err));
-		return false;
-	}
-
-	if ((err = ::snd_pcm_hw_params_any(playHandle, hw_params)) < 0) {
-		::fprintf(stderr, "Cannot initialize hardware parameter structure (%s)\n", ::snd_strerror(err));
-		return false;
-	}
-
-	if ((err = ::snd_pcm_hw_params_set_access(playHandle, hw_params, SND_PCM_ACCESS_RW_INTERLEAVED)) < 0) {
-		::fprintf(stderr, "Cannot set access type (%s)\n", ::snd_strerror(err));
-		return false;
-	}
-
-	if ((err = ::snd_pcm_hw_params_set_format(playHandle, hw_params, SND_PCM_FORMAT_S16_LE)) < 0) {
-		::fprintf(stderr, "Cannot set sample format (%s)\n", ::snd_strerror(err));
-		return false;
-	}
-
-	if ((err = ::snd_pcm_hw_params_set_rate(playHandle, hw_params, m_sampleRate, 0)) < 0) {
-		::fprintf(stderr, "Cannot set sample rate (%s)\n", ::snd_strerror(err));
-		return false;
-	}
-
-	unsigned int playChannels = 1U;
-
-	if ((err = ::snd_pcm_hw_params_set_channels(playHandle, hw_params, 1)) < 0) {
-		playChannels = 2U;
-
-		if ((err = ::snd_pcm_hw_params_set_channels(playHandle, hw_params, 2)) < 0) {
-			::fprintf(stderr, "Cannot play set channel count (%s)\n", ::snd_strerror(err));
-			return false;
-		}
-	}
-
-	if ((err = ::snd_pcm_hw_params(playHandle, hw_params)) < 0) {
-		::fprintf(stderr, "Cannot set parameters (%s)\n", ::snd_strerror(err));
-		return false;
-	}
-
-	::snd_pcm_hw_params_free(hw_params);
-
-	if ((err = ::snd_pcm_prepare(playHandle)) < 0) {
-		::fprintf(stderr, "Cannot prepare audio interface for use (%s)\n", ::snd_strerror(err));
-		return false;
-	}
-
-	// Open Capture
-	snd_pcm_t* recHandle = NULL;
-	if ((err = ::snd_pcm_open(&recHandle, buf2, SND_PCM_STREAM_CAPTURE, 0)) < 0) {
-		::fprintf(stderr, "Cannot open capture audio device %s (%s)\n", readDevice.c_str(), ::snd_strerror(err));
-		return false;
-	}
-
-	if ((err = ::snd_pcm_hw_params_malloc(&hw_params)) < 0) {
-		::fprintf(stderr, "Cannot allocate hardware parameter structure (%s)\n", ::snd_strerror(err));
-		return false;
-	}
-
-	if ((err = ::snd_pcm_hw_params_any(recHandle, hw_params)) < 0) {
-		::fprintf(stderr, "Cannot initialize hardware parameter structure (%s)\n", ::snd_strerror(err));
-		return false;
-	}
-
-	if ((err = ::snd_pcm_hw_params_set_access(recHandle, hw_params, SND_PCM_ACCESS_RW_INTERLEAVED)) < 0) {
-		::fprintf(stderr, "Cannot set access type (%s)\n", ::snd_strerror(err));
-		return false;
-	}
-
-	if ((err = ::snd_pcm_hw_params_set_format(recHandle, hw_params, SND_PCM_FORMAT_S16_LE)) < 0) {
-		::fprintf(stderr, "Cannot set sample format (%s)\n", ::snd_strerror(err));
-		return false;
-	}
-
-	if ((err = ::snd_pcm_hw_params_set_rate(recHandle, hw_params, m_sampleRate, 0)) < 0) {
-		::fprintf(stderr, "Cannot set sample rate (%s)\n", ::snd_strerror(err));
-		return false;
-	}
-
-	unsigned int recChannels = 1U;
-
-	if ((err = ::snd_pcm_hw_params_set_channels(recHandle, hw_params, 1)) < 0) {
-		recChannels = 2U;
-
-		if ((err = ::snd_pcm_hw_params_set_channels (recHandle, hw_params, 2)) < 0) {
-			::fprintf(stderr, "Cannot rec set channel count (%s)\n", ::snd_strerror(err));
-			return false;
-		}
-	}
-
-	if ((err = ::snd_pcm_hw_params(recHandle, hw_params)) < 0) {
-		::fprintf(stderr, "Cannot set parameters (%s)\n", ::snd_strerror(err));
-		return false;
-	}
-
-	::snd_pcm_hw_params_free(hw_params);
-
-	if ((err = ::snd_pcm_prepare(recHandle)) < 0) {
-		::fprintf(stderr, "Cannot prepare audio interface for use (%s)\n", ::snd_strerror(err));
-		return false;
-	}
-
-	short samples[256];
-	for (unsigned int i = 0U; i < 10U; ++i)
-		::snd_pcm_readi(recHandle, samples, 128);
-
-	::printf("Opened %s %s Rate %u\n", writeDevice.c_str(), readDevice.c_str(), m_sampleRate);
-
-	m_reader = new CSoundCardReader(recHandle,  m_blockSize, recChannels,  m_callback);
-	m_writer = new CSoundCardWriter(playHandle, m_blockSize, playChannels, m_callback);
-
-	m_reader->run();
-	m_writer->run();
-
- 	return true;
+    switch(pa_context_get_state(c)) {
+        case PA_CONTEXT_READY:
+        case PA_CONTEXT_TERMINATED:
+        case PA_CONTEXT_FAILED:
+            pa_threaded_mainloop_signal(This->m_mainloop, 0);
+            break;
+        case PA_CONTEXT_UNCONNECTED:
+        case PA_CONTEXT_CONNECTING:
+        case PA_CONTEXT_AUTHORIZING:
+        case PA_CONTEXT_SETTING_NAME:
+            break;
+    }
 }
 
-void CSoundCardReaderWriter::close()
-{
-	m_reader->kill();
-	m_writer->kill();
+void CSoundCardReaderWriter::streamWriteCallback(pa_stream* stream, size_t bytes, void* userdata) {
+    CSoundCardReaderWriter *This = static_cast<CSoundCardReaderWriter*>(userdata);
+    char *buffer;
 
-	m_reader->wait();
-	m_writer->wait();
+    //    fprintf(stderr, "Request to write %d bytes\n", bytes);
+    // XXX Need to fill buffer here.
+    buffer = (char *) malloc(bytes);
+    ::memset(buffer, 0, bytes);
+    pa_stream_write(stream, buffer, bytes, NULL, 0, PA_SEEK_RELATIVE);
+//    ::fprintf(stderr, ".");
+    free(buffer);
 }
 
-bool CSoundCardReaderWriter::isWriterBusy() const
-{
-	return m_writer->isBusy();
+void CSoundCardReaderWriter::streamReadCallback(pa_stream* stream, size_t bytes, void *userdata) {
+    CSoundCardReaderWriter *This = static_cast<CSoundCardReaderWriter*>(userdata);
+    const void *data;
+
+    while(pa_stream_readable_size(stream) > 0 ) {
+        if(pa_stream_peek(stream, &data, &bytes) < 0) {
+            ::fprintf(stderr, "pa_stream_peak() failed: %s", pa_strerror(pa_context_errno(This->m_context)));
+            return;
+        }
+        This->m_callback->readCallback((float *) data, bytes / sizeof(float));
+        pa_stream_drop(stream);
+    }
+
+    pa_threaded_mainloop_signal(This->m_mainloop, 0);
+
+//    ::fprintf(stderr, "!");
 }
 
-CSoundCardReader::CSoundCardReader(snd_pcm_t* handle, unsigned int blockSize, unsigned int channels, IAudioCallback* callback) :
-CThread(),
-m_handle(handle),
-m_blockSize(blockSize),
-m_channels(channels),
-m_callback(callback),
-m_killed(false),
-m_buffer(NULL),
-m_samples(NULL)
-{
-	assert(handle != NULL);
-	assert(blockSize > 0U);
-	assert(channels == 1U || channels == 2U);
-	assert(callback != NULL);
+void* CSoundCardReaderWriter::receiveProcessingLoop(void *userdata) {
+    CSoundCardReaderWriter* This = static_cast<CSoundCardReaderWriter*>(userdata);
 
-	m_buffer  = new float[blockSize];
-	m_samples = new short[2U * blockSize];
+    while(1) {
+        pa_threaded_mainloop_lock(This->m_mainloop);
+        pa_threaded_mainloop_wait(This->m_mainloop);
+        This->m_callback->processReceiveData();
+        pa_threaded_mainloop_unlock(This->m_mainloop);
+    }
 }
 
-CSoundCardReader::~CSoundCardReader()
-{
-	delete[] m_buffer;
-	delete[] m_samples;
+bool CSoundCardReaderWriter::open() {
+    pa_sample_spec sampleSpec = {
+        .format = PA_SAMPLE_FLOAT32NE,
+        .rate = m_sampleRate,
+        .channels = 1
+    };
+
+
+    pa_buffer_attr bufferAttr;
+    bufferAttr.maxlength = -1;
+    bufferAttr.tlength = m_blockSize * sizeof(float);
+    bufferAttr.prebuf = -1;
+    bufferAttr.minreq = -1;
+    bufferAttr.fragsize = m_blockSize * sizeof(float);
+
+    m_mainloop = pa_threaded_mainloop_new();
+    assert(m_mainloop);
+
+    pa_threaded_mainloop_lock(m_mainloop);
+
+    m_context = pa_context_new(pa_threaded_mainloop_get_api(m_mainloop), "MMDVM-UDRC");
+    if(!m_context) {
+        ::fprintf(stderr, "Cannot create pulseaudio context.\n");
+        pa_threaded_mainloop_unlock(m_mainloop);
+        pa_threaded_mainloop_free(m_mainloop);
+        return false;
+    }
+
+    pa_context_set_state_callback(m_context, contextStateCallback, this);
+
+    if(pa_context_connect(m_context, "unix:/var/run/pulse/native", (pa_context_flags_t)0, NULL) < 0) {
+        ::fprintf(stderr, "Cannot connect to pulseaudio context.\n");
+        pa_context_disconnect(m_context);
+        pa_context_unref(m_context);
+        pa_threaded_mainloop_unlock(m_mainloop);
+        pa_threaded_mainloop_free(m_mainloop);
+        return false;
+    }
+
+    if(pa_threaded_mainloop_start(m_mainloop) < 0) {
+        ::fprintf(stderr, "Cannot connect to start pulseaudio main loop.\n");
+        pa_context_disconnect(m_context);
+        pa_context_unref(m_context);
+        pa_threaded_mainloop_unlock(m_mainloop);
+        pa_threaded_mainloop_free(m_mainloop);
+        return false;
+    }
+
+    ::fprintf(stderr, "Connecting to pulseaudio server...\n");
+    pa_threaded_mainloop_wait(m_mainloop);
+    if(pa_context_get_state(m_context) != PA_CONTEXT_READY) {
+        ::fprintf(stderr, "Cannot connect to pulseaudio server.\n");
+        goto error;
+    }
+    ::fprintf(stderr, "Connected to pulseaudio server.\n");
+
+    m_playbackStream = pa_stream_new(m_context, "Transmit", &sampleSpec, NULL);
+    if(!m_playbackStream) {
+        ::fprintf(stderr, "Cannot create transmit stream\n");
+        goto error;
+    }
+
+    m_captureStream = pa_stream_new(m_context, "Receive", &sampleSpec, NULL);
+    if(!m_captureStream) {
+        ::fprintf(stderr, "Cannot create receive stream\n");
+        goto error;
+    }
+
+    pa_stream_set_write_callback(m_playbackStream, streamWriteCallback, this);
+    pa_stream_set_read_callback(m_captureStream, streamReadCallback, this);
+
+    // XXX Second parameter "dev" should be set to draws-left or draws-right
+    if(pa_stream_connect_playback(m_playbackStream, m_playbackDevice.c_str(), &bufferAttr, static_cast<pa_stream_flags_t>(PA_STREAM_DONT_MOVE|PA_STREAM_ADJUST_LATENCY), NULL, NULL) < 0) {
+        ::fprintf(stderr, "Cannot connect to pulseaudio playback stream\n");
+        goto error;
+    }
+
+    // XXX Code to wait until stream is connected
+
+    // XXX Second parameter "dev" should be set to draws-left or draws-right
+    if(pa_stream_connect_record(m_captureStream, m_captureDevice.c_str(), &bufferAttr, static_cast<pa_stream_flags_t>(PA_STREAM_DONT_MOVE|PA_STREAM_ADJUST_LATENCY)) < 0) {
+        ::fprintf(stderr, "Cannot connect to pulseaudio capture stream\n");
+        goto error;
+    }
+
+    // XXX Code to wait until stream is connected
+
+    pa_threaded_mainloop_unlock(m_mainloop);
+
+    //  Start the receive processing thread
+    pthread_create(&m_receiveThread, NULL, receiveProcessingLoop, this);
+
+    return true;
+
+    error:
+        fprintf(stderr, "PulseAudio error: %s\n" ,pa_strerror(pa_context_errno(m_context)));
+        pa_threaded_mainloop_unlock(m_mainloop);
+        pa_threaded_mainloop_stop(m_mainloop);
+        pa_context_disconnect(m_context);
+        pa_context_unref(m_context);
+        pa_threaded_mainloop_free(m_mainloop);
+        return false;
 }
 
-void CSoundCardReader::entry()
-{
-	while (!m_killed) {
-		snd_pcm_sframes_t ret;
-		while ((ret = ::snd_pcm_readi(m_handle, m_samples, m_blockSize)) < 0) {
-			if (ret != -EPIPE)
-				::fprintf(stderr, "snd_pcm_readi returned %ld (%s)\n", ret, ::snd_strerror(ret));
-
-			::snd_pcm_recover(m_handle, ret, 1);
-		}
-
-		if (m_channels == 1U) {
-			for (int n = 0; n < ret; n++)
-				m_buffer[n] = float(m_samples[n]) / 32768.0F;
-		} else {
-			int i = 0;
-			for (int n = 0; n < (ret * 2); n += 2)
-				m_buffer[i++] = float(m_samples[n + 1]) / 32768.0F;
-		}
-
-		m_callback->readCallback(m_buffer, (unsigned int)ret);
-	}
-
-	::snd_pcm_close(m_handle);
-}
-
-void CSoundCardReader::kill()
-{
-	m_killed = true;
-}
-
-CSoundCardWriter::CSoundCardWriter(snd_pcm_t* handle, unsigned int blockSize, unsigned int channels, IAudioCallback* callback) :
-CThread(),
-m_handle(handle),
-m_blockSize(blockSize),
-m_channels(channels),
-m_callback(callback),
-m_killed(false),
-m_buffer(NULL),
-m_samples(NULL)
-{
-	assert(handle != NULL);
-	assert(blockSize > 0U);
-	assert(channels == 1U || channels == 2U);
-	assert(callback != NULL);
-
-	m_buffer  = new float[2U * blockSize];
-	m_samples = new short[4U * blockSize];
-}
-
-CSoundCardWriter::~CSoundCardWriter()
-{
-	delete[] m_buffer;
-	delete[] m_samples;
-}
-
-void CSoundCardWriter::entry()
-{
-	while (!m_killed) {
-		int nSamples = 2U * m_blockSize;
-		m_callback->writeCallback(m_buffer, nSamples);
-
-		if (nSamples == 0U) {
-			sleep(5UL);
-		} else {
-			if (m_channels == 1U) {
-				for (int n = 0U; n < nSamples; n++)
-					m_samples[n] = short(m_buffer[n] * 32767.0F);
-			} else {
-				int i = 0U;
-				for (int n = 0U; n < nSamples; n++) {
-					short sample = short(m_buffer[n] * 32767.0F);
-					m_samples[i++] = sample;
-					m_samples[i++] = sample;			// Same value to both channels
-				}
-			}
-
-			int offset = 0U;
-			snd_pcm_sframes_t ret;
-			while ((ret = ::snd_pcm_writei(m_handle, m_samples + offset, nSamples - offset)) != (nSamples - offset)) {
-				if (ret < 0) {
-					if (ret != -EPIPE)
-						::fprintf(stderr, "snd_pcm_writei returned %ld (%s)\n", ret, ::snd_strerror(ret));
-
-					::snd_pcm_recover(m_handle, ret, 1);
-				} else {
-					offset += ret;
-				}
-			}
-		}
-	}
-
-	::snd_pcm_close(m_handle);
-}
-
-void CSoundCardWriter::kill()
-{
-	m_killed = true;
-}
-
-bool CSoundCardWriter::isBusy() const
-{
-	snd_pcm_state_t state = ::snd_pcm_state(m_handle);
-
-	return state == SND_PCM_STATE_RUNNING || state == SND_PCM_STATE_DRAINING;
+void CSoundCardReaderWriter::close() {
 }

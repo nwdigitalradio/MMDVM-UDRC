@@ -64,10 +64,10 @@ enum MMDVM_STATE {
 #include "Debug.h"
 #include "IO.h"
 
-const uint16_t RX_BLOCK_SIZE = 2U;
+const uint16_t RX_BLOCK_SIZE = 2;
 
-const uint16_t TX_RINGBUFFER_SIZE = 500U;
-const uint16_t RX_RINGBUFFER_SIZE = 600U;
+const uint16_t TX_RINGBUFFER_SIZE = 12000U;
+const uint16_t RX_RINGBUFFER_SIZE = 51200;
 
 extern MMDVM_STATE m_modemState;
 

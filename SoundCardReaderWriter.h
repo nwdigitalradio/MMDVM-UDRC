@@ -15,84 +15,14 @@
 #ifndef	SoundCardReaderWriter_H
 #define	SoundCardReaderWriter_H
 
-#include "AudioCallback.h"
-#include "Thread.h"
-
 #include <string>
+#include <pulse/pulseaudio.h>
 
-#if (defined(__APPLE__) && defined(__MACH__)) || defined(_WIN32) || defined(_WIN64)
-
-#include "portaudio.h"
-
-class CSoundCardReaderWriter {
-public:
-	CSoundCardReaderWriter(const std::string& readDevice, const std::string& writeDevice, unsigned int sampleRate, unsigned int blockSize);
-	~CSoundCardReaderWriter();
-
-	void setCallback(IAudioCallback* callback);
-	bool open();
-	void close();
-
-	void callback(const float* input, float* output, unsigned int nSamples);
-
-private:
-	std::string     m_readDevice;
-	std::string     m_writeDevice;
-	unsigned int    m_sampleRate;
-	unsigned int    m_blockSize;
-	IAudioCallback* m_callback;
-	PaStream*       m_stream;
-
-	bool convertNameToDevices(PaDeviceIndex& inDev, PaDeviceIndex& outDev);
-};
-
-#else
-
-#include <alsa/asoundlib.h>
-
-class CSoundCardReader : public CThread {
-public:
-	CSoundCardReader(snd_pcm_t* handle, unsigned int blockSize, unsigned int channels, IAudioCallback* callback);
-	virtual ~CSoundCardReader();
-
-	virtual void entry();
-
-	virtual void kill();
-
-private:
-	snd_pcm_t*      m_handle;
-	unsigned int    m_blockSize;
-	unsigned int    m_channels;
-	IAudioCallback* m_callback;
-	bool            m_killed;
-	float*          m_buffer;
-	short*          m_samples;
-};
-
-class CSoundCardWriter : public CThread {
-public:
-	CSoundCardWriter(snd_pcm_t* handle, unsigned int blockSize, unsigned int channels, IAudioCallback* callback);
-	virtual ~CSoundCardWriter();
-
-	virtual void entry();
-
-	virtual void kill();
-
-	virtual bool isBusy() const;
-
-private:
-	snd_pcm_t*      m_handle;
-	unsigned int    m_blockSize;
-	unsigned int    m_channels;
-	IAudioCallback* m_callback;
-	bool            m_killed;
-	float*          m_buffer;
-	short*          m_samples;
-};
+#include "AudioCallback.h"
 
 class CSoundCardReaderWriter {
 public:
-	CSoundCardReaderWriter(const std::string& readDevice, const std::string& writeDevice, unsigned int sampleRate, unsigned int blockSize);
+	CSoundCardReaderWriter(const std::string& captureDevice, const std::string& playbackDevice, unsigned int sampleRate, unsigned int blockSize);
 	~CSoundCardReaderWriter();
 
 	void setCallback(IAudioCallback* callback);
@@ -101,16 +31,26 @@ public:
 
 	bool isWriterBusy() const;
 
-private:
-	std::string          m_readDevice;
-	std::string          m_writeDevice;
-	unsigned int         m_sampleRate;
-	unsigned int         m_blockSize;
-	IAudioCallback*      m_callback;
-	CSoundCardReader*    m_reader;
-	CSoundCardWriter*    m_writer;
-};
+	static void contextStateCallback(pa_context *c, void *userdata);
+	static void streamWriteCallback(pa_stream* stream, size_t bytes, void* userdata);
+	static void streamReadCallback(pa_stream* stream, size_t bytes, void* userdata);
 
-#endif
+    static void* receiveProcessingLoop(void *userdata);
+
+private:
+	std::string             m_captureDevice;
+	std::string             m_playbackDevice;
+	unsigned int            m_sampleRate;
+	unsigned int            m_blockSize;
+	IAudioCallback*         m_callback;
+	pa_threaded_mainloop*   m_mainloop;
+	pa_context*             m_context;
+	pa_stream*              m_playbackStream;
+	pa_stream*              m_captureStream;
+
+    pthread_t             m_receiveThread;
+
+	float                   m_writeBuffer[96000];
+};
 
 #endif

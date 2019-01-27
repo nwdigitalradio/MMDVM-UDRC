@@ -1,4 +1,5 @@
 *.o
 *~
 *.bak
-MMDVM
+mmdvm-udrc
+gmon.out

@@ -21,6 +21,8 @@
 #include "Globals.h"
 #include "IO.h"
 
+#include <pthread.h>
+
 // Generated using [b, a] = butter(1, 0.0005) in MATLAB
 static float DC_FILTER[] = {0.000784782F, 0.000000000F, 0.000784782F, 0.000000000F, 0.998430436F, 0.000000000F}; // {b0, 0, b1, b2, -a1, -a2}
 const uint32_t DC_FILTER_STAGES = 1U; // One Biquad stage
@@ -127,6 +129,103 @@ void CIO::start()
   setMode();
 }
 
+void CIO::processReceiveData() {
+    //  XXX This get reused over and over again, should they just be instance
+    //  XXX variables?  And how many of these do we really need?
+    float samples[RX_BLOCK_SIZE];
+    float dcValues[RX_BLOCK_SIZE];
+    float dcSamples[RX_BLOCK_SIZE];
+
+//    ::fprintf(stderr, "?");
+
+    while (m_rxBuffer.getData() >= RX_BLOCK_SIZE) {
+        for (uint16_t i = 0U; i < RX_BLOCK_SIZE; i++) {
+            float sample;
+            m_rxBuffer.get(sample);
+
+            // Detect ADC overflow
+            if (m_detect && (sample == -1.0F || sample == 1.0F))
+                m_adcOverflow++;
+
+            samples[i] = (sample - m_rxDCOffset) * m_rxLevel;
+        }
+
+        if (m_lockout)
+            continue;
+
+        m_dcFilter.process(samples, dcValues, RX_BLOCK_SIZE);
+
+        float offset = 0.0F;
+        for (uint8_t i = 0U; i < RX_BLOCK_SIZE; i++)
+            offset += dcValues[i];
+
+        offset /= float(RX_BLOCK_SIZE);
+
+        for (uint8_t i = 0U; i < RX_BLOCK_SIZE; i++)
+            dcSamples[i] = samples[i] - offset;
+
+        if (m_modemState == STATE_IDLE) {
+          if (m_dstarEnable) {
+            float GMSKVals[RX_BLOCK_SIZE];
+            m_gaussianFilter.process(dcSamples, GMSKVals, RX_BLOCK_SIZE);
+            dstarRX.samples(GMSKVals, RX_BLOCK_SIZE);
+          }
+
+          if (m_p25Enable) {
+            float P25Vals[RX_BLOCK_SIZE];
+            m_boxcarFilter.process(dcSamples, P25Vals, RX_BLOCK_SIZE);
+            p25RX.samples(P25Vals, RX_BLOCK_SIZE);
+          }
+
+          if (m_nxdnEnable) {
+            float NXDNValsTmp[RX_BLOCK_SIZE];
+            m_nxdnFilter.process(dcSamples, NXDNValsTmp, RX_BLOCK_SIZE);
+            float NXDNVals[RX_BLOCK_SIZE];
+            m_nxdnISincFilter.process(NXDNValsTmp, NXDNVals, RX_BLOCK_SIZE);
+
+//             nxdnRX.samples(NXDNVals, RX_BLOCK_SIZE);
+          }
+
+          if (m_dmrEnable || m_ysfEnable) {
+            float RRCVals[RX_BLOCK_SIZE];
+            m_rrcFilter.process(samples, RRCVals, RX_BLOCK_SIZE);
+
+            if (m_ysfEnable)
+              ysfRX.samples(RRCVals, RX_BLOCK_SIZE);
+
+            if (m_dmrEnable)
+              dmrDMORX.samples(RRCVals, RX_BLOCK_SIZE);
+          }
+        } else if (m_dstarEnable && m_modemState == STATE_DSTAR) {
+            float GMSKVals[RX_BLOCK_SIZE];
+            m_gaussianFilter.process(dcSamples, GMSKVals, RX_BLOCK_SIZE);
+            dstarRX.samples(GMSKVals, RX_BLOCK_SIZE);
+        } else if (m_dmrEnable && m_modemState == STATE_DMR) {
+            float DMRVals[RX_BLOCK_SIZE];
+            m_rrcFilter.process(samples, DMRVals, RX_BLOCK_SIZE);
+            dmrDMORX.samples(DMRVals, RX_BLOCK_SIZE);
+        } else if (m_ysfEnable && m_modemState == STATE_YSF) {
+            float YSFVals[RX_BLOCK_SIZE];
+            m_rrcFilter.process(dcSamples, YSFVals, RX_BLOCK_SIZE);
+            ysfRX.samples(YSFVals, RX_BLOCK_SIZE);
+        } else if (m_p25Enable && m_modemState == STATE_P25) {
+            float P25Vals[RX_BLOCK_SIZE];
+            m_boxcarFilter.process(dcSamples, P25Vals, RX_BLOCK_SIZE);
+            p25RX.samples(P25Vals, RX_BLOCK_SIZE);
+        } else if (m_nxdnEnable && m_modemState == STATE_NXDN) {
+            float NXDNValsTmp[RX_BLOCK_SIZE];
+            m_nxdnFilter.process(dcSamples, NXDNValsTmp, RX_BLOCK_SIZE);
+            float NXDNVals[RX_BLOCK_SIZE];
+            m_nxdnISincFilter.process(NXDNValsTmp, NXDNVals, RX_BLOCK_SIZE);
+            nxdnRX.samples(NXDNVals, RX_BLOCK_SIZE);
+        } else if (m_modemState == STATE_DSTARCAL) {
+            float GMSKVals[RX_BLOCK_SIZE];
+            m_gaussianFilter.process(samples, GMSKVals, RX_BLOCK_SIZE);
+            calDStarRX.samples(GMSKVals, RX_BLOCK_SIZE);
+        }
+    }
+}
+
 void CIO::process()
 {
   m_ledCount++;
@@ -161,109 +260,6 @@ void CIO::process()
   if (m_txBuffer.getData() == 0U && m_tx) {
     m_tx = false;
     setPTTInt(m_pttInvert ? true : false);
-  }
-
-  if (m_rxBuffer.getData() >= RX_BLOCK_SIZE) {
-    float samples[RX_BLOCK_SIZE];
-
-    for (uint16_t i = 0U; i < RX_BLOCK_SIZE; i++) {
-      float sample;
-      m_rxBuffer.get(sample);
-
-      // Detect ADC overflow
-      if (m_detect && (sample == -1.0F || sample == 1.0F))
-        m_adcOverflow++;
-
-      samples[i] = (sample - m_rxDCOffset) * m_rxLevel;
-    }
-
-    if (m_lockout)
-      return;
-
-    float dcValues[RX_BLOCK_SIZE];
-    m_dcFilter.process(samples, dcValues, RX_BLOCK_SIZE);
-
-    float offset = 0.0F;
-    for (uint8_t i = 0U; i < RX_BLOCK_SIZE; i++)
-      offset += dcValues[i];
-    offset /= float(RX_BLOCK_SIZE);
-
-    float dcSamples[RX_BLOCK_SIZE];
-    for (uint8_t i = 0U; i < RX_BLOCK_SIZE; i++)
-      dcSamples[i] = samples[i] - offset;
-
-    if (m_modemState == STATE_IDLE) {
-      if (m_dstarEnable) {
-        float GMSKVals[RX_BLOCK_SIZE];
-        m_gaussianFilter.process(dcSamples, GMSKVals, RX_BLOCK_SIZE);
-        dstarRX.samples(GMSKVals, RX_BLOCK_SIZE);
-      }
-
-      if (m_p25Enable) {
-        float P25Vals[RX_BLOCK_SIZE];
-        m_boxcarFilter.process(dcSamples, P25Vals, RX_BLOCK_SIZE);
-        p25RX.samples(P25Vals, RX_BLOCK_SIZE);
-      }
-
-      if (m_nxdnEnable) {
-        float NXDNValsTmp[RX_BLOCK_SIZE];
-        m_nxdnFilter.process(dcSamples, NXDNValsTmp, RX_BLOCK_SIZE);
-        float NXDNVals[RX_BLOCK_SIZE];
-        m_nxdnISincFilter.process(NXDNValsTmp, NXDNVals, RX_BLOCK_SIZE);
-
-        nxdnRX.samples(NXDNVals, RX_BLOCK_SIZE);
-      }
-
-      if (m_dmrEnable || m_ysfEnable) {
-        float RRCVals[RX_BLOCK_SIZE];
-        m_rrcFilter.process(samples, RRCVals, RX_BLOCK_SIZE);
-
-        if (m_ysfEnable)
-          ysfRX.samples(RRCVals, RX_BLOCK_SIZE);
-
-        if (m_dmrEnable)
-          dmrDMORX.samples(RRCVals, RX_BLOCK_SIZE);
-      }
-    } else if (m_modemState == STATE_DSTAR) {
-      if (m_dstarEnable) {
-        float GMSKVals[RX_BLOCK_SIZE];
-        m_gaussianFilter.process(dcSamples, GMSKVals, RX_BLOCK_SIZE);
-        dstarRX.samples(GMSKVals, RX_BLOCK_SIZE);
-      }
-    } else if (m_modemState == STATE_DMR) {
-      if (m_dmrEnable) {
-        float DMRVals[RX_BLOCK_SIZE];
-        m_rrcFilter.process(samples, DMRVals, RX_BLOCK_SIZE);
-
-        dmrDMORX.samples(DMRVals, RX_BLOCK_SIZE);
-      }
-    } else if (m_modemState == STATE_YSF) {
-      if (m_ysfEnable) {
-        float YSFVals[RX_BLOCK_SIZE];
-        m_rrcFilter.process(dcSamples, YSFVals, RX_BLOCK_SIZE);
-        ysfRX.samples(YSFVals, RX_BLOCK_SIZE);
-      }
-    } else if (m_modemState == STATE_P25) {
-      if (m_p25Enable) {
-        float P25Vals[RX_BLOCK_SIZE];
-        m_boxcarFilter.process(dcSamples, P25Vals, RX_BLOCK_SIZE);
-        p25RX.samples(P25Vals, RX_BLOCK_SIZE);
-      }
-    } else if (m_modemState == STATE_NXDN) {
-      if (m_nxdnEnable) {
-        float NXDNValsTmp[RX_BLOCK_SIZE];
-        m_nxdnFilter.process(dcSamples, NXDNValsTmp, RX_BLOCK_SIZE);
-        float NXDNVals[RX_BLOCK_SIZE];
-        m_nxdnISincFilter.process(NXDNValsTmp, NXDNVals, RX_BLOCK_SIZE);
-
-        nxdnRX.samples(NXDNVals, RX_BLOCK_SIZE);
-      }
-    } else if (m_modemState == STATE_DSTARCAL) {
-      float GMSKVals[RX_BLOCK_SIZE];
-      m_gaussianFilter.process(samples, GMSKVals, RX_BLOCK_SIZE);
-
-      calDStarRX.samples(GMSKVals, RX_BLOCK_SIZE);
-    }
   }
 }
 
@@ -402,15 +398,13 @@ bool CIO::hasLockout() const
   return m_lockout;
 }
 
-void CIO::readCallback(const float* input, unsigned int nSamples)
-{
-  for (unsigned int i = 0U; i < nSamples; i++)
-    m_rxBuffer.put(input[i]);
+void CIO::readCallback(const float* input, unsigned int nSamples) {
+    for (unsigned int i = 0U; i < nSamples; i++)
+        m_rxBuffer.put(input[i]);
 }
 
-void CIO::writeCallback(float* output, int& nSamples)
-{
-  for (int i = 0U; i < nSamples; i++)
-    m_txBuffer.get(output[i]);
+void CIO::writeCallback(float* output, int& nSamples) {
+    for (int i = 0U; i < nSamples; i++)
+        m_txBuffer.get(output[i]);
 }
 

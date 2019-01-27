@@ -572,6 +572,23 @@ void CSerialPort::process()
 {
 	mmdvm_frame frame = { 0 };
 	uint8_t err = 2;
+    fd_set set;
+    struct timeval timeout = {
+        .tv_sec = 0,
+        .tv_usec = 100000
+    };
+
+    FD_ZERO(&set);
+    FD_SET(m_fd, &set);
+
+    int rv = select(m_fd + 1, &set, NULL, NULL, &timeout);
+    if(rv == -1) {
+        ::fprintf(stderr, "Couldn't select from pty: %s\n", strerror(errno));
+        return;
+    } else if (rv == 0) {
+        return;
+    };
+
 
 	int read_bytes = ::read(m_fd, (void *) &frame, 2);
 	if(read_bytes < 0) {
@@ -580,10 +597,11 @@ void CSerialPort::process()
 		} else if(errno == EIO) {
 			::fprintf(stderr, "Slave disconnected, reopening master\n");
 			::close(m_fd);
+			::exit(0);
 			open();
 			return;
 		} else {
-			::fprintf(stderr, "Couldn't read from pty: %s\n", strerror(errno));
+			::fprintf(stderr, "Couldn't read from pty 1: %s\n", strerror(errno));
 			return;
 		}
 	}
@@ -599,7 +617,7 @@ void CSerialPort::process()
 		int read_bytes = ::read(m_fd, (void *) &(frame.length), 1);
 		if(read_bytes != 1) {
 			if(errno != EAGAIN)
-				::fprintf(stderr, "Couldn't read from pty: %s\n", strerror(errno));
+				::fprintf(stderr, "Couldn't read from pty 2: %s\n", strerror(errno));
 			return;
 		}
 	}
@@ -616,8 +634,8 @@ void CSerialPort::process()
 			if(errno == -EAGAIN)
 				continue;
 			else {
-				::fprintf(stderr, "Couldn't read from pty: %s\n", strerror(errno));
-				continue;
+				::fprintf(stderr, "Couldn't read from pty 3: %s\n", strerror(errno));
+				return;
 			}
 		}
 		to_read -= read_bytes;

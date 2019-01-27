@@ -24,6 +24,9 @@
 
 #include <sys/types.h>
 #include <pwd.h>
+#include <unistd.h>
+#include <getopt.h>
+#include <systemd/sd-daemon.h>
 
 // Global variables
 MMDVM_STATE m_modemState = STATE_IDLE;
@@ -70,9 +73,9 @@ CIO io;
 
 void loop()
 {
-  serial.process();
 
-  io.process();
+  serial.process();
+//  io.process();
 
   // The following is for transmitting
   if (m_dstarEnable && m_modemState == STATE_DSTAR)
@@ -111,114 +114,64 @@ void loop()
 
 int main(int argc, char** argv)
 {
-  std::string audioDev("hw:CARD=udrc,DEV=0");
-  //std::string audioDev("plughw:CARD=Device,DEV=0");  // for USB soundcard - list with aplay -L
+    std::string ptyPath("/dev/ttyMMDVM0");
 
-  std::string ptyPath("ttyMMDVM0");
-  bool daemon = false;
+    int c;
 
-  if (::getuid() == 0)
-    ptyPath = "/dev/ttyMMDVM0";
+    while (1) {
+        static struct option long_options[] = {
+            {"port",  required_argument, 0, 'p'},
+            {"help",  no_argument,       0, 'h'},
+            {0, 0, 0, 0}
+        };
 
-  for (int i=1; i<argc; i++) {
-    char* arg = argv[i];
-    char* param = NULL;
+        int option_index = 0;
 
-    if (arg[0] == '-' && arg[1] == 'd') {
-      daemon = true;
-    } else {
-      if (arg[0] == '-' && i + 1 < argc)
-        param = argv[i+1];
+        c = getopt_long (argc, argv, "p:h", long_options, &option_index);
 
-      if (::strcmp("-port", arg) == 0 && param != NULL) {
-        i++;
-        ptyPath = param;
-      } else if (::strcmp("-audio", arg) == 0 && param != NULL) {
-        i++;
-        audioDev = param;
-      } else {
-        ::fprintf(stderr, "MMDVM-UDRC modem\nUsage: MMDVM [-daemon] -port <vpty port> -audio <audiodev>\n\nUsing params: <vpty port> = %s | <audiodev> = %s \n", ptyPath.c_str(), audioDev.c_str());
-      }
-    }
-  }
+        if (c == -1)
+            break;
 
-  serial.setPtyPath(ptyPath);
-  bool ret = serial.open();
-  if (!ret) {
-    ::fprintf(stderr,"Unable to open serial port on vpty: %s\n",ptyPath.c_str());
-    return 1;
-  }
+        switch (c) {
+            case 'p':
+                ptyPath = optarg;
+                break;
 
-  CSoundCardReaderWriter sound(audioDev, audioDev, 48000U, RX_BLOCK_SIZE);
-  sound.setCallback(&io);
+            case 'h':
+            case '?':
+                ::fprintf(stderr, "Usage: mmdvm-udrc [--port <vty port>]\n");
+                exit(1);
+                break;
 
-  ret = sound.open();
-  if (!ret) {
-    ::fprintf(stderr, "Unable to open audio device: %s\n", audioDev.c_str());
-    return 1;
-  }
-
-  if (daemon) {
-    // Create new process
-    pid_t pid = ::fork();
-    if (pid == -1) {
-      ::fprintf(stderr, "Couldn't fork() , exiting\n");
-      return 1;
-    } else if (pid != 0) {
-      exit(EXIT_SUCCESS);
+            default:
+                abort ();
+        }
     }
 
-    // Create new session and process group
-    if (::setsid() == -1) {
-      ::fprintf(stderr, "Couldn't setsid(), exiting\n");
-      return 1;
+    ::fprintf(stderr, "Opening PTY at %s\n", ptyPath.c_str());
+    serial.setPtyPath(ptyPath);
+
+    bool ret = serial.open();
+    if (!ret) {
+        ::fprintf(stderr,"Unable to open serial port on vpty: %s\n",ptyPath.c_str());
+        exit(1);
     }
 
-    // Set the working directory to the root directory
-    if (::chdir("/") == -1) {
-      ::fprintf(stderr, "Couldn't cd /, exiting\n");
-      return 1;
-    }
+    CSoundCardReaderWriter sound("draws-capture-right", "draws-playback-right", 48000, 512);
+    sound.setCallback(&io);
 
-    ::close(STDIN_FILENO);
-    ::close(STDOUT_FILENO);
-    ::close(STDERR_FILENO);
-
-    // If we are currently root...
-    if (getuid() == 0) {
-      struct passwd* user = ::getpwnam("mmdvm");
-      if (user == NULL) {
-        ::fprintf(stderr, "Could not get the mmdvm user, exiting\n");
+    ret = sound.open();
+    if (!ret) {
+        ::fprintf(stderr, "Unable to open audio device\n");
         return 1;
-      }
-
-      uid_t mmdvm_uid = user->pw_uid;
-      gid_t mmdvm_gid = user->pw_gid;
-
-      // Set user and group ID's to mmdvm:mmdvm
-      if (setgid(mmdvm_gid) != 0) {
-        ::fprintf(stderr, "Could not set mmdvm GID, exiting\n");
-        return 1;
-      }
-
-      if (setuid(mmdvm_uid) != 0) {
-        ::fprintf(stderr, "Could not set mmdvm UID, exiting\n");
-        return 1;
-      }
-
-      // Double check it worked (AKA Paranoia)
-      if (setuid(0) != -1) {
-        ::fprintf(stderr, "It's possible to regain root - something is wrong!, exiting\n");
-        return 1;
-      }
     }
-  }
 
-  for (;;) {
-    loop();
-    CThread::sleep(5U);
-  }
+    sd_notify(0, "READY=1");
 
-  return 0;
+    for (;;) {
+        loop();
+    }
+
+    return 0;
 }
 

@@ -313,7 +313,7 @@ void CDStarRX::processNone(float sample)
   bool ret = correlateFrameSync();
   if (ret) {
     m_countdown = 5U;
-	
+
     m_headerBuffer[m_headerPtr] = sample;
     m_headerPtr++;
 
@@ -376,6 +376,7 @@ void CDStarRX::processHeader(float sample)
     m_minSyncPtr = 470U;
 
     DEBUG5("DStarRX: calc start/sync/max/min", m_startPtr, m_syncPtr, m_maxSyncPtr, m_minSyncPtr);
+    ::fprintf(stderr,"DStarRX: calc %d/%d/%d/%d", m_startPtr, m_syncPtr, m_maxSyncPtr, m_minSyncPtr);
 
     m_rxState = DSRXS_DATA;
   }
@@ -694,11 +695,11 @@ void CDStarRX::acs(int* metric)
 
   m_mar++;
 }
- 
+
 void CDStarRX::viterbiDecode(int* data)
 {
   int metric[8U];
-  
+
   metric[0] = (data[1] ^ 0) + (data[0] ^ 0);
   metric[1] = (data[1] ^ 1) + (data[0] ^ 1);
   metric[2] = (data[1] ^ 1) + (data[0] ^ 0);
@@ -707,7 +708,7 @@ void CDStarRX::viterbiDecode(int* data)
   metric[5] = (data[1] ^ 0) + (data[0] ^ 0);
   metric[6] = (data[1] ^ 0) + (data[0] ^ 1);
   metric[7] = (data[1] ^ 1) + (data[0] ^ 0);
-  
+
   acs(metric);
 }
 
